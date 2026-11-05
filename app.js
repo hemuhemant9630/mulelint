@@ -11,7 +11,7 @@
   const CAT_LABEL = {};
   for (const r of ML.RULE_META) CAT_LABEL[r.category] = r.categoryLabel;
   const LAYOUT_LABEL = { MULE_SRC: "deployable JAR with sources", SOURCE: "project ZIP", JAR: "deployable JAR without sources" };
-  const MAX_BYTES = 50 * 1024 * 1024;
+  const MAX_BYTES = 150 * 1024 * 1024;
 
   // ------------------------------------------------------------------ helpers
 
@@ -119,7 +119,7 @@
     if (!file) return;
     const lower = file.name.toLowerCase();
     if (!lower.endsWith(".jar") && !lower.endsWith(".zip")) return showDropError("Choose the .jar from target/ or a .zip of the project folder.");
-    if (file.size > MAX_BYTES) return showDropError(`This file is ${bytes(file.size)}. The limit is 50 MB.`);
+    if (file.size > MAX_BYTES) return showDropError(`This file is ${bytes(file.size)}. The limit is 150 MB.`);
     runScan(file.name, async () => {
       const head = new Uint8Array(await file.slice(0, 4).arrayBuffer());
       if (head[0] !== 0x50 || head[1] !== 0x4b) throw new ML.UserError("This file is not a JAR or ZIP archive.");
@@ -217,7 +217,7 @@
           <div class="drop" id="drop">
             <div class="stack" style="gap:8px">
               <h2 style="font-size:1.1875rem">Check a Mule app</h2>
-              <p>Drop the deployable JAR from <code>target/</code>, or a .zip of the project folder to include MUnit checks. Up to 50 MB.</p>
+              <p>Drop the deployable JAR from <code>target/</code>, or a .zip of the project folder to include MUnit checks. Up to 150 MB.</p>
             </div>
             <div class="row">
               <button class="btn" id="pick">Choose file</button>
