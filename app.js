@@ -47,13 +47,44 @@
     },
   };
 
-  // History lives in memory first; localStorage keeps it across visits when the browser allows it.
-  let history = store.get("history", []);
-  let profile = store.get("profile", { disabled: [], severities: {}, params: {} });
-  let ignored = store.get("ignored", {}); // artifactId -> [fingerprints]
+  // ------------------------------------------------------------------ account
+
+  const ROLES = ["MuleSoft Developer", "Integration Architect", "Technical Lead", "QA / Test Engineer", "Project Manager", "Consultant", "Student", "Other"];
+  let user = null; // { id, name, email, organization, role }
+
+  async function authCall(action, body) {
+    let res;
+    try {
+      res = await fetch("/api/auth/" + action, {
+        method: body === undefined && action === "me" ? "GET" : "POST",
+        headers: body ? { "Content-Type": "application/json" } : {},
+        body: body ? JSON.stringify(body) : undefined,
+        credentials: "same-origin",
+      });
+    } catch (e) {
+      throw new Error("Cannot reach MuleLint. Check your connection and try again.");
+    }
+    let data = {};
+    try { data = await res.json(); } catch (e) { /* not JSON */ }
+    if (!res.ok) {
+      const err = new Error(data.error || `Request failed (${res.status}).`);
+      err.status = res.status;
+      throw err;
+    }
+    return data;
+  }
+
+  // Each account keeps its own history, rule profile and ignored findings in this browser.
+  const userKey = (k) => (user ? `u.${user.id}.${k}` : `anon.${k}`);
+  let history = [], profile = { disabled: [], severities: {}, params: {} }, ignored = {};
+  function loadUserData() {
+    history = store.get(userKey("history"), []);
+    profile = store.get(userKey("profile"), { disabled: [], severities: {}, params: {} });
+    ignored = store.get(userKey("ignored"), {}); // artifactId -> [finding keys]
+  }
 
   function saveHistory() {
-    while (!store.set("history", history) && history.length > 1) history.pop();
+    while (!store.set(userKey("history"), history) && history.length > 1) history.pop();
   }
   /** Matches a finding across scans even when one upload is a JAR and the next a project ZIP (paths differ). */
   const keyOf = (f) => {
@@ -65,7 +96,7 @@
     const s = ignoredSet(artifactId);
     on ? s.add(fp) : s.delete(fp);
     ignored[artifactId] = [...s];
-    store.set("ignored", ignored);
+    store.set(userKey("ignored"), ignored);
   }
   const profileChanges = () => profile.disabled.length + Object.keys(profile.severities).length + Object.values(profile.params).filter(Boolean).length;
 
@@ -214,7 +245,7 @@
               <li>Same engine as the MuleLint CLI, so the score matches your CI gate.</li>
             </ul>
           </div>
-          <div class="drop" id="drop">
+          ${user ? `<div class="drop" id="drop">
             <div class="stack" style="gap:8px">
               <h2 style="font-size:1.1875rem">Check a Mule app</h2>
               <p>Drop the deployable JAR from <code>target/</code>, or a .zip of the project folder to include MUnit checks. Up to 150 MB.</p>
@@ -229,7 +260,13 @@
               <span class="small muted">No JAR to hand? Try a sample.</span>
               ${Object.entries(SAMPLES).map(([k, s]) => `<div class="sample"><span><code>${esc(s.label)}</code> <span class="small muted">${esc(s.note)}</span></span><button class="btn btn-quiet btn-small" data-sample="${esc(k)}">Scan sample</button></div>`).join("")}
             </div>
-          </div>
+          </div>` : `<div class="drop gate">
+            <div class="stack" style="gap:8px">
+              <h2 style="font-size:1.1875rem">Create a free account to check your apps</h2>
+              <p>Sign in to scan JARs and project ZIPs, keep your scan history and set your team's rule profile. Your files are still read in this browser and never uploaded.</p>
+            </div>
+            <div class="row"><a class="btn" href="#signup">Create account</a><a class="btn btn-quiet" href="#signin">Sign in</a></div>
+          </div>`}
         </section>
         ${recent.length ? `<section style="padding-bottom:40px">
           <div class="spread" style="margin-bottom:10px"><h2 style="font-size:1.1875rem">Recent scans</h2><a href="#history" class="small">All history</a></div>
@@ -254,6 +291,7 @@
         </div>
       </div></section>`;
     const drop = document.getElementById("drop");
+    if (!drop) return;
     const input = document.getElementById("file");
     document.getElementById("pick").onclick = () => input.click();
     input.onchange = () => { scanFile(input.files[0]); input.value = ""; };
@@ -555,20 +593,114 @@
         if (k === "minRuntimeVersion" && !/^\d+(\.\d+){0,2}$/.test(v)) return toast("Minimum Mule runtime must look like 4.6.0.");
       }
       profile = draft;
-      toast(store.set("profile", profile) ? "Profile saved. It applies to your next scan." : "Profile applied for this visit. This browser blocks saving it.");
+      toast(store.set(userKey("profile"), profile) ? "Profile saved. It applies to your next scan." : "Profile applied for this visit. This browser blocks saving it.");
     };
     document.getElementById("reset").onclick = () => {
       profile = { disabled: [], severities: {}, params: {} };
-      store.set("profile", profile);
+      store.set(userKey("profile"), profile);
       toast("Rule profile reset to the MuleLint defaults.");
       renderProfile();
     };
   }
 
+  // ------------------------------------------------------------------ sign in / sign up
+
+  let afterAuth = ""; // hash to return to after signing in
+
+  function renderAccount() {
+    const el = document.getElementById("account");
+    if (!el) return;
+    if (user) {
+      el.innerHTML = `<span class="who"><b>${esc(user.name)}</b><span class="small muted">${esc(user.role)}, ${esc(user.organization)}</span></span>
+        <button class="btn btn-quiet btn-small" id="signout">Sign out</button>`;
+      document.getElementById("signout").onclick = signOut;
+    } else {
+      el.innerHTML = `<a class="btn btn-quiet btn-small" href="#signin">Sign in</a><a class="btn btn-small hide-xs" href="#signup">Create account</a>`;
+    }
+  }
+
+  async function signOut() {
+    try { await authCall("logout", {}); } catch (e) { /* the cookie is cleared server-side when reachable */ }
+    user = null;
+    loadUserData();
+    renderAccount();
+    toast("Signed out.");
+    location.hash = "";
+    route();
+  }
+
+  function renderAuth(mode) {
+    setNav(null);
+    const signup = mode === "signup";
+    view.innerHTML = `<div class="wrap auth-wrap"><div class="sheet auth-card">
+      <h1>${signup ? "Create your account" : "Sign in to MuleLint"}</h1>
+      <p class="muted" style="margin-top:6px">${signup ? "Free. Your Mule files are still checked in this browser and never uploaded." : "Use the email and password you signed up with."}</p>
+      <form id="auth-form" class="stack" style="margin-top:20px" novalidate>
+        ${signup ? `<div class="field"><label for="a-name">Full name</label><input class="input" id="a-name" name="name" autocomplete="name" maxlength="100" required></div>` : ""}
+        <div class="field"><label for="a-email">Work email</label><input class="input" id="a-email" name="email" type="email" autocomplete="email" maxlength="254" required></div>
+        <div class="field"><label for="a-password">Password</label><input class="input" id="a-password" name="password" type="password" autocomplete="${signup ? "new-password" : "current-password"}" minlength="8" maxlength="128" required>
+          ${signup ? `<span class="hint">At least 8 characters.</span>` : ""}</div>
+        ${signup ? `<div class="field"><label for="a-org">Organization name</label><input class="input" id="a-org" name="organization" autocomplete="organization" maxlength="120" required></div>
+        <div class="field"><label for="a-role">Role</label><select class="select" id="a-role" name="role" required style="width:100%"><option value="">Choose your role</option>${ROLES.map((r) => `<option>${esc(r)}</option>`).join("")}</select></div>` : ""}
+        <div id="auth-error"></div>
+        <button class="btn" type="submit" id="auth-submit" style="width:100%">${signup ? "Create account" : "Sign in"}</button>
+      </form>
+      <p class="small muted" style="margin-top:18px">${signup ? `Already have an account? <a href="#signin">Sign in</a>` : `New to MuleLint? <a href="#signup">Create an account</a>`}</p>
+    </div></div>`;
+    const form = document.getElementById("auth-form");
+    const errEl = document.getElementById("auth-error");
+    const btn = document.getElementById("auth-submit");
+    const showErr = (m) => { errEl.innerHTML = `<p class="notice notice-error" role="alert">${esc(m)}</p>`; };
+    (form.querySelector("input") || {}).focus?.();
+    form.onsubmit = async (e) => {
+      e.preventDefault();
+      const f = Object.fromEntries(new FormData(form).entries());
+      for (const k of Object.keys(f)) if (k !== "password") f[k] = String(f[k]).trim();
+      if (signup && !f.name) return showErr("Enter your name.");
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(f.email || "")) return showErr("Enter a valid email address.");
+      if (!f.password || (signup && f.password.length < 8)) return showErr(signup ? "Use a password of at least 8 characters." : "Enter your password.");
+      if (signup && !f.organization) return showErr("Enter your organization name.");
+      if (signup && !f.role) return showErr("Choose your role.");
+      btn.disabled = true;
+      btn.textContent = signup ? "Creating account" : "Signing in";
+      try {
+        const r = await authCall(signup ? "signup" : "login", f);
+        user = r.user;
+        loadUserData();
+        renderAccount();
+        toast(signup ? `Welcome to MuleLint, ${user.name.split(" ")[0]}.` : `Signed in as ${user.email}.`);
+        const next = afterAuth;
+        afterAuth = "";
+        location.hash = next;
+        route();
+      } catch (err) {
+        showErr(err.message);
+        btn.disabled = false;
+        btn.textContent = signup ? "Create account" : "Sign in";
+      }
+    };
+  }
+
   // ------------------------------------------------------------------ routing
+
+  const PRIVATE = (h) => h === "report" || h === "history" || h === "rule-profile" || h.startsWith("scan-");
 
   function route() {
     const h = decodeURIComponent(location.hash.replace(/^#/, ""));
+    if (h === "signin" || h === "signup") {
+      if (user) { location.hash = ""; return; }
+      renderAuth(h);
+      window.scrollTo(0, 0);
+      return;
+    }
+    if (!user && PRIVATE(h)) {
+      afterAuth = h;
+      window.history.replaceState(null, "", "#signin");
+      renderAuth("signin");
+      window.scrollTo(0, 0);
+      return;
+    }
+    afterAuth = ""; // the visitor moved on; don't send them back somewhere stale later
     if (h === "report") renderReport(null);
     else if (h.startsWith("scan-")) renderReport(h.slice(5));
     else if (h === "history") renderHistory();
@@ -580,5 +712,15 @@
     if (!h.startsWith("rules-")) window.scrollTo(0, 0);
   }
   window.addEventListener("hashchange", route);
-  route();
+
+  // Find out who is signed in before drawing anything that depends on it.
+  view.innerHTML = `<div class="wrap page-head muted" aria-busy="true">Loading</div>`;
+  authCall("me")
+    .then((r) => { user = r.user; })
+    .catch(() => { user = null; })
+    .finally(() => {
+      loadUserData();
+      renderAccount();
+      route();
+    });
 })();
