@@ -232,6 +232,7 @@ pre.block { margin: 0; padding: 12px 14px; overflow-x: auto; background: var(--s
 .savebar { position: sticky; bottom: 0; background: var(--paper); padding: 12px 0 calc(12px + env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--line); }
 .toast { position: fixed; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--paper); padding: 10px 16px; border-radius: var(--radius-s); font-size: 0.9375rem; z-index: 50; max-width: calc(100% - 32px); }
 .footer { border-top: 1px solid var(--line); padding: 24px 0 40px; color: var(--ink-3); font-size: 0.8125rem; }
+.credit { margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 0.75rem; font-weight: 600; color: var(--ink-2); }
 </style>
 </head>
 <body>
@@ -256,7 +257,11 @@ pre.block { margin: 0; padding: 12px 14px; overflow-x: auto; background: var(--s
     <span>MuleLint checks Mule 4 applications against integration best practices. Files are read in this browser and never uploaded.</span>
     <a href="#rules">Rule catalog</a>
   </div>
+  <div class="wrap">
+    <p class="credit">&copy; <span id="year">2026</span> All rights reserved to Hemant Raghuwanshi, Solution Consultant (Caelius Consulting)</p>
+  </div>
 </footer>
+<script>try { document.getElementById("year").textContent = new Date().getFullYear(); } catch (e) {}</script>
 <div id="toast" class="toast" role="status" hidden></div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
